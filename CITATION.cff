@@ -1,0 +1,9 @@
+cff-version: 1.2.0
+message: "If you use this pipeline, please cite it."
+title: "mvGWAS-WMHv: multivariate GWAS pipeline for WMH volumes"
+type: software
+authors:
+  - family-names: "Baouche"
+    given-names: "Kahina"
+date-released: "2026-02-20"
+license: "MIT"

@@ -1,0 +1,30 @@
+# Data / results
+data/raw/
+data/derived/
+results/
+logs/
+*.vcf.gz
+*.vcf.gz.tbi
+*.bcf
+*.bed
+*.bim
+*.fam
+
+# Nextflow
+.nextflow*
+work/
+trace.txt
+timeline.html
+report.html
+
+# Python/R
+__pycache__/
+*.pyc
+.Rhistory
+.RData
+.env
+config/paths.env
+
+# OS/editor
+.DS_Store
+.vscode/

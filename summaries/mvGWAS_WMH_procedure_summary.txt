@@ -1,0 +1,123 @@
+Multivariate GWAS of White Matter Hyperintensities (WMH) Project Summary
+and Reproducible Workflow Author: Kahina Baouche Date: 2026-02-18
+
+==================================================================== 1.
+PROJECT OBJECTIVE
+====================================================================
+
+The goal of this project is to perform a multivariate genome-wide
+association study (mvGWAS) of regional white matter hyperintensities
+(WMH) using the MANTA framework (Garrido-Martín et al., 2023).
+
+The analysis jointly models 30 WMH subregions to detect pleiotropic
+genetic effects without assuming normality of phenotypes.
+
+Final deliverables: - chr22 test run (validation) - Full genome-wide
+multivariate GWAS - Reproducible workflow for remote cluster execution
+
+==================================================================== 2.
+DATA ORGANISATION
+====================================================================
+
+Main project directory: /home/kbaouche/mvGWAS_WMHv/
+
+Subdirectories:
+
+data_geno/ updated_merged_imputed_ALFA_fullQC.bed
+updated_merged_imputed_ALFA_fullQC.bim
+updated_merged_imputed_ALFA_fullQC.fam
+updated_merged_imputed_ALFA_fullQC.vcf.gz
+updated_merged_imputed_ALFA_fullQC.vcf.gz.tbi
+updated_merged_imputed_ALFA_fullQC.ALFA_ID.vcf.gz
+updated_merged_imputed_ALFA_fullQC.ALFA_ID.vcf.gz.tbi chr22.vcf.gz
+chr22.vcf.gz.tbi
+
+analysis_ready/ WMH_phenotypes_complete.tsv WMH_covariates_complete.tsv
+
+results/ (Nextflow output directory)
+
+==================================================================== 3.
+DATA PREPARATION STEPS
+====================================================================
+
+3.1 Phenotype Preparation - Extracted 30 WMH regional subvolumes -
+Removed total volume and unused columns - Ensured tab-separated format -
+First column: ALFA_ID - No missing phenotype values
+
+3.2 Covariate Preparation - Cleaned quotes - Encoded sex (Men=1,
+Women=0) - Selected covariates: age education TIV sex PC1–PC5 - Removed
+individuals with missing PCs - Ensured complete-case dataset
+
+Final sample size after filtering: 1283 individuals
+
+3.3 Genotype Preparation - Converted BED/BIM/FAM to bgzipped VCF -
+Created tabix index (.tbi) - Renamed sample IDs: GWAS_ID_GWAS_ID →
+ALFA_ID using ALFA_genetics_final_ids.txt mapping - Verified ID
+consistency - Subset VCF to individuals present in phenotype file
+(1283) - Created chr22 subset for testing
+
+==================================================================== 4.
+ID HARMONISATION STRATEGY
+====================================================================
+
+Original genotype IDs: GWAS_ID_GWAS_ID
+
+Mapping file: GWAS_ID → ALFA_ID
+
+Procedure: 1. Generate PTID = GWAS_ID_GWAS_ID 2. Create two-column
+mapping: PTID ALFA_ID 3. Use bcftools reheader 4. Remove unmapped
+individuals 5. Re-index VCF
+
+Final genotype sample IDs: Numeric ALFA_ID
+
+==================================================================== 5.
+CHR22 TEST PIPELINE (REMOTE CLUSTER)
+====================================================================
+
+Execution via Nextflow and Singularity:
+
+nextflow run mvgwas.nf
+–pheno /home/kbaouche/mvGWAS_WMHv/WMH_phenotypes_complete.tsv
+–geno /home/kbaouche/mvGWAS_WMHv/chr22.vcf.gz
+–cov /home/kbaouche/mvGWAS_WMHv/WMH_covariates_complete.tsv
+–dir /home/kbaouche/mvGWAS_WMHv/results
+–l 100
+-with-singularity
+
+Important: - Run from writable scratch directory (avoid home quota) -
+Use screen or tmux for long jobs
+
+==================================================================== 6.
+COMPUTATIONAL CONSIDERATIONS
+====================================================================
+
+Local Machine: - 12-core CPU - GPU not required (MANTA is CPU-bound)
+
+Remote HPC: - Use scratch directory - Redirect NXF_HOME and work
+directories - Ensure Singularity cache not in HOME
+
+==================================================================== 7.
+QUALITY CONTROL CHECKS
+====================================================================
+
+-   Verified no missing covariates
+-   Verified phenotype–VCF ID overlap (1283 individuals)
+-   Confirmed chr22 contig naming consistency
+-   Ensured .vcf.gz and .tbi files exist
+
+==================================================================== 8.
+NEXT STEPS
+====================================================================
+
+1.  Validate chr22 results
+2.  Scale to all chromosomes
+3.  Perform functional annotation (MAGMA/FUMA)
+4.  Generate Manhattan and QQ plots
+5.  Document full reproducible pipeline
+
+====================================================================
+
+This document summarizes the complete preparation, harmonisation, and
+execution workflow for the multivariate GWAS of WMH using MANTA.
+
+End of document.
