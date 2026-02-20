@@ -1,170 +1,170 @@
-# mvGWAS-WMHv
+# mvGWAS_pipeline_reproducible
 
-Sex-stratified **multivariate GWAS** pipeline for **White Matter Hyperintensity (WMH) volumes**, designed for HPC execution using **SLURM job arrays** and **mvgwas-nf (Nextflow)**.
+A **reproducible, end-to-end** pipeline to run **sex-stratified multivariate GWAS** (mvGWAS) with **MANTA / mvgwas-nf**:
+1) **Preprocessing**: validate + normalize inputs, harmonize subject IDs across genotype/phenotype/covariate files, optionally convert PLINK → bgzipped VCF, and create sex-split datasets.
+2) **Analysis (SLURM + Nextflow)**: submit per-chromosome mvGWAS jobs (female/male) via a single SLURM job array.
+3) **Merge + visualization**: merge per-chromosome results and generate Manhattan/QQ plots.
+
+---
 
 ## Repository structure
 
-- `scripts/preprocessing/` — build analysis-ready male/female inputs
-- `scripts/analysis/` — run mvGWAS per chromosome in parallel (SLURM arrays) + merge results
-- `scripts/visualization/` — QQ and Manhattan plots from merged outputs
-- `run_all.sh` — master script (preprocessing → analysis → visualization)
-- `config/` — path and parameter configuration templates
-- `docs/` — procedure log + reproduction guide
+- `run_all.sh` — main entrypoint (preprocess → analysis → visualization)
+- `config/paths.example.env` — template to configure paths
+- `scripts/preprocessing/` — format checks, ID harmonization, sex split
+- `scripts/analysis/` — SLURM submission + chromosome-parallel Nextflow runs + merge
+- `scripts/visualization/` — plotting wrappers
+- `tests/` — lightweight unit tests (where applicable)
+- `docs/` — extra documentation
+
+---
 
 ## Requirements
 
-- `bcftools` (VCF slicing + indexing)
-- `java` and `nextflow`
-- optional: `singularity` if you run `-with-singularity`
-- `python3` (preprocessing splitter)
-- `R` (plots)
+### Core tools
+- Bash
+- `python3` (with `pandas`)
+- `bcftools` (for VCF conversion/indexing and region extraction)
+- SLURM (`sbatch`, and optionally `squeue` if you want `--wait`)
+- Nextflow + Java
+- R (`Rscript`) for visualization
 
-Cluster module hints: see `environment/modules_slurm.txt`.
+### Optional
+- `plink2` (preferred) or `plink` — only needed if your genotype input is PLINK (`.bed/.bim/.fam`)
 
-## Inputs
+---
 
-Set `GENO_INPUT` (preferred) or `VCF_FILE` (legacy) in `config/paths.env`.
+## Quickstart
 
-1. **Whole-genome VCF** (bgzipped): `VCF_FILE`
-   - **PLINK** prefix (`.bed/.bim/.fam`) — converted to `.vcf.gz` during preprocessing (requires `plink2` or `plink`).
-
-2. **Phenotypes TSV** with header and an `ID` column: `PHENOTYPE_FILE`
-3. **Covariates TSV** with header including `ID`, `sex` and PCs: `COVARIATE_FILE`
-
-Sex coding is configurable (default `1=male`, `2=female`).
-
-## Quickstart (recommended)
-
-1) Copy config and edit paths:
+### 1) Configure paths
+Copy the example env file and edit it:
 
 ```bash
 cp config/paths.example.env config/paths.env
 nano config/paths.env
 ```
 
-2) Run everything:
+At minimum you must set:
 
+- `BASE_DIR` — working directory where all outputs will be written
+- `GENO_INPUT` — genotype input (see below)
+- `PHENOTYPE_FILE` — phenotype TSV
+- `COVARIATE_FILE` — covariate TSV (must include sex column)
+- `PIPELINE_DIR` — directory containing `mvgwas.nf` (from mvgwas-nf)
+
+### 2) Run everything (recommended)
 ```bash
-bash run_all.sh --env config/paths.env
+bash run_all.sh --env config/paths.env --wait
 ```
 
-3) Run only some chromosomes:
-
+### 3) Do a strong dry-run (recommended before spending compute)
 ```bash
-bash run_all.sh --env config/paths.env --chrs 16,18,20 --wait
+bash run_all.sh --env config/paths.env --dry-run
 ```
 
-> Tip: You can also restrict chromosomes at submission time for each sex:
-> `sbatch --array=16,18,20 scripts/analysis/run_mvgwas_parallel_sex.sh ...`
+Dry-run checks:
+- tools available in PATH
+- file formats are readable
+- overlap of subject IDs across genotype / phenotype / covariates (where possible without full computation)
+- prints the commands that would run
+
+---
+
+## Inputs
+
+### Genotypes (`GENO_INPUT`)
+Supported:
+- `*.vcf.gz` (bgzipped) + `*.tbi`
+- `*.vcf` or `*.bcf` (will be converted/indexed)
+- PLINK prefix (either `prefix` where `prefix.bed/.bim/.fam` exist, or a direct `*.bed` path)
+
+Preprocessing will produce:
+- `BASE_DIR/derived/inputs/genotypes.vcf.gz` (+ index)
+- `BASE_DIR/derived/inputs/genotypes.filtered.vcf.gz` (+ index), filtered to subjects present in **all three** (geno/pheno/covar)
+
+### Phenotypes (`PHENOTYPE_FILE`)
+- TSV file with an ID column (default column name: `ID`)
+
+### Covariates (`COVARIATE_FILE`)
+- TSV file with an ID column (default `ID`)
+- must contain a sex column (default `sex`) coded as:
+  - male: `1` (default)
+  - female: `2` (default)
+
+You can override column names/codes via env or CLI.
+
+---
+
+## What preprocessing produces
+
+After preprocessing (`scripts/preprocessing/run_preprocessing.sh`) you should have:
+
+- `BASE_DIR/derived/inputs/`
+  - `covariates.filtered.tsv`
+  - `phenotypes.filtered.tsv`
+  - `genotypes.filtered.vcf.gz` (+ `.tbi`)
+- `BASE_DIR/data_female/`
+  - `WMH_covariates.tsv`
+  - `WMH_phenotypes.tsv`
+- `BASE_DIR/data_male/`
+  - `WMH_covariates.tsv`
+  - `WMH_phenotypes.tsv`
+
+These sex-specific TSVs are what the analysis stage consumes.
+
+---
 
 ## Running stages separately
 
-### Preprocessing
-
-Preprocessing will:
-- convert covariates/phenotypes to TSV if needed
-- ensure genotype is bgzipped VCF (`.vcf.gz`) with a `.tbi` index
-- compute the intersection of IDs across **covariates**, **phenotypes**, and **VCF samples**
-- write filtered covariates/phenotypes and a sample-filtered VCF
-- then split filtered tables by sex
-
-
-Creates:
-- `<BASE_DIR>/data_male/WMH_phenotypes.tsv`
-- `<BASE_DIR>/data_male/WMH_covariates.tsv`
-- `<BASE_DIR>/data_female/WMH_phenotypes.tsv`
-- `<BASE_DIR>/data_female/WMH_covariates.tsv`
-
+### Preprocessing only
 ```bash
-bash scripts/preprocessing/run_preprocessing.sh \
-  --covar "$COVARIATE_FILE" \
-  --pheno "$PHENOTYPE_FILE" \
-  --outdir "$BASE_DIR"
+bash scripts/preprocessing/run_preprocessing.sh   --geno "$GENO_INPUT"   --covar "$COVARIATE_FILE"   --pheno "$PHENOTYPE_FILE"   --outdir "$BASE_DIR"   --sex-col sex --male-code 1 --female-code 2
 ```
 
-### Analysis (SLURM arrays)
-
-Submits male and female arrays, then merges outputs:
-
+### Analysis only (requires preprocessing outputs)
 ```bash
-bash scripts/analysis/run_analysis.sh \
-  --base-dir "$BASE_DIR" \
-  --vcf "$VCF_FILE" \
-  --pipeline "$PIPELINE_DIR" \
-  --chrs 1-22 --wait
+bash scripts/analysis/run_analysis.sh   --base-dir "$BASE_DIR"   --vcf "$BASE_DIR/derived/inputs/genotypes.filtered.vcf.gz"   --pipeline "$PIPELINE_DIR"   --chrs 1-22   --with-singularity 1   --resume 1   --window-l 500   --wait
 ```
 
-Outputs:
-- `<BASE_DIR>/results_male/chr*/...`
-- `<BASE_DIR>/results_female/chr*/...`
-- `<BASE_DIR>/results_merged/mvgwas_merged_male.tsv`
-- `<BASE_DIR>/results_merged/mvgwas_merged_female.tsv`
-
-### Visualization
-
+### Run different chromosomes per sex (example)
+Female chromosome 13 only, male chromosomes 10 and 16 only:
 ```bash
-bash scripts/visualization/run_visualization.sh \
-  --merged-male "$BASE_DIR/results_merged/mvgwas_merged_male.tsv" \
-  --merged-female "$BASE_DIR/results_merged/mvgwas_merged_female.tsv" \
-  --outdir "$BASE_DIR/results/figures"
+bash scripts/analysis/run_analysis.sh   --base-dir "$BASE_DIR"   --vcf "$BASE_DIR/derived/inputs/genotypes.filtered.vcf.gz"   --pipeline "$PIPELINE_DIR"   --female-chrs 13   --male-chrs 10,16   --with-singularity 1   --resume 1   --window-l 500
 ```
 
-## Notes on chromosome naming
+---
 
-The analysis script auto-detects whether your VCF contigs use `16` or `chr16` and chooses the correct bcftools region accordingly.
+## Outputs
 
-## Docs
+### Per-chromosome mvGWAS results
+- `BASE_DIR/results_female/chr<CHR>/mvgwas_chr<CHR>.tsv`
+- `BASE_DIR/results_male/chr<CHR>/mvgwas_chr<CHR>.tsv`
 
-- `docs/procedure_done.md` — narrative log of what was done
-- `docs/reproduce.md` — step-by-step reproduction guide
+### Merged results
+- `BASE_DIR/results_merged/mvgwas_merged_female.tsv`
+- `BASE_DIR/results_merged/mvgwas_merged_male.tsv`
+
+### Figures (if visualization enabled)
+- `BASE_DIR/results/figures/` (Manhattan/QQ, etc.)
+
+---
+
+## Notes on SLURM + Nextflow
+
+- The analysis stage submits **one SLURM array** where each task corresponds to one `(sex, chromosome)` pair.
+- Chromosome extraction uses `bcftools view -r <region>` and auto-detects whether your VCF contigs are `chr1` vs `1`.
+
+---
+
+## Troubleshooting
+
+- **Missing sex-specific TSVs**: run preprocessing first; analysis expects:
+  - `BASE_DIR/data_male/WMH_phenotypes.tsv`, `BASE_DIR/data_male/WMH_covariates.tsv`
+  - `BASE_DIR/data_female/WMH_phenotypes.tsv`, `BASE_DIR/data_female/WMH_covariates.tsv`
+
+- **Contig naming issues** (`chr1` vs `1`): the submission wrapper auto-detects contig prefix from the VCF header. If your contigs are non-standard, you may need to normalize them upstream.
+
+---
 
 ## License
-
-MIT (see `LICENSE`).
-## Dry-run mode
-
-Dry-run is **strong** by default:
-- it reads genotype sample IDs (from VCF via `bcftools query -l`, or from PLINK `.fam`)
-- computes overlap with covariate/phenotype IDs
-- fails early if overlap is **zero**
-- does not write outputs or submit jobs
-
-
-All stage scripts and `run_all.sh` support `--dry-run`.
-
-- Checks **input paths** and **tool availability**
-- Prints commands that would be executed
-- Does not submit jobs or generate outputs
-
-Example:
-
-```bash
-bash run_all.sh --env config/paths.env --chrs 16,18,20 --dry-run
-```
-
-## Unit tests
-
-Tests live in `tests/` and are designed to run without a full HPC stack.
-
-Run:
-
-```bash
-make test
-```
-
-
-
-### Sex-specific chromosome selection
-
-If you want different chromosome sets per sex, use:
-
-```bash
-bash scripts/analysis/run_analysis.sh \
-  --base-dir "$BASE_DIR" \
-  --vcf "$VCF_FILE" \
-  --pipeline "$PIPELINE_DIR" \
-  --male-chrs 10,16 \
-  --female-chrs 13
-```
-
-You can still use `--chrs` to apply the same set to both sexes.
+See `LICENSE`.

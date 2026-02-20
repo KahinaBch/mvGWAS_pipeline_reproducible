@@ -86,11 +86,18 @@ PY
 
 # Analysis tools (required if analysis stage will run)
 
-# If preprocessing produced a sample-filtered VCF, use it for analysis
+# If preprocessing produced a sample-filtered VCF, use it for analysis.
 FILTERED_VCF="$BASE_DIR/derived/inputs/genotypes.filtered.vcf.gz"
-if [[ "$SKIP_PRE" -eq 0 && -f "$FILTERED_VCF" ]]; then
-  VCF_FILE="$FILTERED_VCF"
+VCF_FOR_ANALYSIS=""
+if [[ -f "$FILTERED_VCF" ]]; then
+  VCF_FOR_ANALYSIS="$FILTERED_VCF"
+elif [[ "$GENO_INPUT" == *.vcf.gz || "$GENO_INPUT" == *.vcf || "$GENO_INPUT" == *.bcf ]]; then
+  VCF_FOR_ANALYSIS="$GENO_INPUT"
+else
+  # If GENO_INPUT is PLINK, preprocessing should have produced a filtered VCF
+  VCF_FOR_ANALYSIS="$FILTERED_VCF"
 fi
+[[ -n "$VCF_FOR_ANALYSIS" ]] || die "No VCF available for analysis. Run preprocessing first."
 if [[ "$SKIP_ANA" -eq 0 ]]; then
   need_cmd sbatch
   need_cmd bcftools
@@ -107,7 +114,8 @@ mkdir -p "$BASE_DIR/logs" "$BASE_DIR/results" "$BASE_DIR/config"
 
 if [[ "$SKIP_PRE" -eq 0 ]]; then
   bash scripts/preprocessing/run_preprocessing.sh \
-    --covar "$COVARIATE_FILE" \
+    --geno \"$GENO_INPUT\" \
+        --covar "$COVARIATE_FILE" \
     --pheno "$PHENOTYPE_FILE" \
     --outdir "$BASE_DIR" \
     --sex-col "$SEX_COL" \
@@ -119,7 +127,7 @@ fi
 if [[ "$SKIP_ANA" -eq 0 ]]; then
   bash scripts/analysis/run_analysis.sh \
     --base-dir "$BASE_DIR" \
-    --geno "$GENO_INPUT" \
+    --vcf "$VCF_FOR_ANALYSIS" \
     --pipeline "$PIPELINE_DIR" \
     --chrs "$CHRS" \
     --with-singularity "$WITH_SINGULARITY" \
@@ -136,3 +144,4 @@ if [[ "$SKIP_VIZ" -eq 0 ]]; then
     --outdir "$BASE_DIR/results/figures" \
     $( [[ "$DRY_RUN" == "1" ]] && echo --dry-run )
 fi
+

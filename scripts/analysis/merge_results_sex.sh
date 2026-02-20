@@ -1,165 +1,78 @@
-#!/bin/bash
-# =============================================================================
-# Merge GWAS Results from All Chromosomes - Sex-stratified
-# =============================================================================
-# Run this after all chromosome jobs (female + male) have completed.
-#
-# Usage:
-#   sbatch merge_results_sex.sh
-#   or
-#   bash  merge_results_sex.sh
-# =============================================================================
-
-#SBATCH --job-name=merge_gwas_sex
-#SBATCH --output=logs/merge_gwas_sex_%j.out
-#SBATCH --error=logs/merge_gwas_sex_%j.err
-#SBATCH --time=01:00:00
-#SBATCH --mem=16G
-#SBATCH --cpus-per-task=1
-
+#!/usr/bin/env bash
 set -euo pipefail
 
-# -----------------------------------------------------------------------------
-# Configuration
-# -----------------------------------------------------------------------------
-BASE_DIR="/home/kbaouche/mvGWAS_WMHv"
+# Merge mvgwas results across chromosomes, separately for male and female.
+# Assumes per-chromosome results live at:
+#   <results_dir>/chr<CHR>/mvgwas_chr<CHR>.tsv
 
-FEMALE_RESULTS_DIR="${BASE_DIR}/results_female"
-MALE_RESULTS_DIR="${BASE_DIR}/results_male"
+# shellcheck source=scripts/analysis/utils.sh
+source scripts/analysis/utils.sh
 
-FEMALE_TEMP_DIR="${BASE_DIR}/data_female/temp_chr_vcf"
-MALE_TEMP_DIR="${BASE_DIR}/data_male/temp_chr_vcf"
+usage() {
+  cat <<'EOF'
+merge_results_sex.sh
 
-mkdir -p "${BASE_DIR}/logs"
+Required:
+  --results-male <DIR>
+  --results-female <DIR>
+  --outdir <DIR>
 
-echo "=========================================="
-echo "Merging GWAS Results (Sex-stratified)"
-echo "Date: $(date)"
-echo "=========================================="
+Optional:
+  --chrs <SPEC>                 Chromosomes for both sexes (default: 1-22)
+  --male-chrs <SPEC>            Override chromosomes for male
+  --female-chrs <SPEC>          Override chromosomes for female
 
-merge_one_sex () {
-    local SEX="$1"
-    local RESULTS_DIR="$2"
-    local TEMP_DIR="$3"
-
-    echo ""
-    echo "------------------------------------------"
-    echo "Processing: ${SEX}"
-    echo "Results dir: ${RESULTS_DIR}"
-    echo "------------------------------------------"
-
-    # Check chromosome results
-    echo "Checking chromosome results for ${SEX}..."
-    local MISSING_CHR=""
-    for CHR in $(seq 1 22); do
-        local RESULT_FILE="${RESULTS_DIR}/chr${CHR}/mvgwas_chr${CHR}.tsv"
-        if [ ! -f "${RESULT_FILE}" ]; then
-            echo "✗ Missing: ${SEX} chr${CHR}"
-            MISSING_CHR="${MISSING_CHR} ${CHR}"
-        else
-            echo "✓ Found: ${SEX} chr${CHR} ($(wc -l < "${RESULT_FILE}") lines)"
-        fi
-    done
-
-    if [ -n "${MISSING_CHR}" ]; then
-        echo ""
-        echo "WARNING: Missing results for ${SEX} chromosomes:${MISSING_CHR}"
-        echo "Some jobs may have failed. Check logs."
-        read -p "Continue with available ${SEX} results? (y/n) " -n 1 -r
-        echo
-        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-            exit 1
-        fi
-    fi
-
-    # Merge
-    echo ""
-    echo "Merging ${SEX} results..."
-    local MERGED_FILE="${RESULTS_DIR}/mvgwas_wmh_${SEX}.tsv"
-
-    # header
-    rm -f "${MERGED_FILE}"
-    for CHR in $(seq 1 22); do
-        local RESULT_FILE="${RESULTS_DIR}/chr${CHR}/mvgwas_chr${CHR}.tsv"
-        if [ -f "${RESULT_FILE}" ]; then
-            head -1 "${RESULT_FILE}" > "${MERGED_FILE}"
-            break
-        fi
-    done
-
-    # data
-    for CHR in $(seq 1 22); do
-        local RESULT_FILE="${RESULTS_DIR}/chr${CHR}/mvgwas_chr${CHR}.tsv"
-        if [ -f "${RESULT_FILE}" ]; then
-            tail -n +2 "${RESULT_FILE}" >> "${MERGED_FILE}"
-        fi
-    done
-
-    echo "✓ Merged file created: ${MERGED_FILE}"
-    echo "  Total variants: $(tail -n +2 "${MERGED_FILE}" | wc -l)"
-
-    # Summary
-    echo ""
-    echo "Creating summary statistics for ${SEX}..."
-    local SUMMARY_FILE="${RESULTS_DIR}/mvgwas_summary_${SEX}.txt"
-
-    cat > "${SUMMARY_FILE}" << EOF
-=============================================================================
-MVGWAS Whole Genome Analysis - Summary (${SEX})
-=============================================================================
-Date: $(date)
-Phenotype: WMH (multivariate)
-=============================================================================
-
-Total variants tested: $(tail -n +2 "${MERGED_FILE}" | wc -l)
-
-Variants per chromosome:
+Outputs:
+  <outdir>/mvgwas_merged_male.tsv
+  <outdir>/mvgwas_merged_female.tsv
 EOF
-
-    for CHR in $(seq 1 22); do
-        local RESULT_FILE="${RESULTS_DIR}/chr${CHR}/mvgwas_chr${CHR}.tsv"
-        if [ -f "${RESULT_FILE}" ]; then
-            local COUNT
-            COUNT=$(tail -n +2 "${RESULT_FILE}" | wc -l)
-            printf "  chr%-2s: %s variants
-" "${CHR}" "${COUNT}" >> "${SUMMARY_FILE}"
-        else
-            printf "  chr%-2s: MISSING
-" "${CHR}" >> "${SUMMARY_FILE}"
-        fi
-    done
-
-    echo "" >> "${SUMMARY_FILE}"
-    echo "Output files:" >> "${SUMMARY_FILE}"
-    echo "  - ${MERGED_FILE}" >> "${SUMMARY_FILE}"
-
-    echo ""
-    echo "----- ${SEX} summary -----"
-    cat "${SUMMARY_FILE}"
-
-    # Cleanup (optional)
-    echo ""
-    read -p "Delete temporary chromosome VCF files for ${SEX}? (y/n) " -n 1 -r
-    echo
-    if [[ $REPLY =~ ^[Yy]$ ]]; then
-        echo "Cleaning up ${SEX} temporary files..."
-        rm -rf "${TEMP_DIR}"
-        echo "✓ ${SEX} temporary files deleted"
-    else
-        echo "${SEX} temporary files kept in: ${TEMP_DIR}"
-    fi
-
-    echo ""
-    echo "Done merging ${SEX}"
 }
 
-# Run for both sexes
-merge_one_sex "female" "${FEMALE_RESULTS_DIR}" "${FEMALE_TEMP_DIR}"
-merge_one_sex "male"   "${MALE_RESULTS_DIR}"   "${MALE_TEMP_DIR}"
+RM=""; RF=""; OUT=""
+CHRS="1-22"; MALE_CHRS=""; FEMALE_CHRS=""
 
-echo ""
-echo "=========================================="
-echo "Merge completed for female + male!"
-echo "=========================================="
-echo "Female: ${FEMALE_RESULTS_DIR}/mvgwas_wmh_female.tsv"
-echo "Male:   ${MALE_RESULTS_DIR}/mvgwas_wmh_male.tsv"
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --results-male) RM="$2"; shift 2;;
+    --results-female) RF="$2"; shift 2;;
+    --outdir) OUT="$2"; shift 2;;
+    --chrs) CHRS="$2"; shift 2;;
+    --male-chrs) MALE_CHRS="$2"; shift 2;;
+    --female-chrs) FEMALE_CHRS="$2"; shift 2;;
+    -h|--help) usage; exit 0;;
+    *) echo "Unknown arg: $1" >&2; usage; exit 1;;
+  esac
+done
+
+[[ -n "$RM" && -n "$RF" && -n "$OUT" ]] || { usage; exit 1; }
+mkdir -p "$OUT"
+
+merge_one() {
+  local sex="$1"
+  local resdir="$2"
+  local spec="$3"
+  local outfile="$4"
+
+  local first=1
+  : > "$outfile"
+
+  while read -r chr; do
+    local f="${resdir}/chr${chr}/mvgwas_chr${chr}.tsv"
+    [[ -f "$f" ]] || die "Missing result for ${sex} chr${chr}: $f"
+    if [[ "$first" == "1" ]]; then
+      cat "$f" >> "$outfile"
+      first=0
+    else
+      # skip header
+      awk 'NR>1{print}' "$f" >> "$outfile"
+    fi
+  done < <(expand_chrs "$spec")
+
+  echo "[merge] wrote: $outfile"
+}
+
+MALE_SPEC="${MALE_CHRS:-$CHRS}"
+FEMALE_SPEC="${FEMALE_CHRS:-$CHRS}"
+
+merge_one "male" "$RM" "$MALE_SPEC" "${OUT}/mvgwas_merged_male.tsv"
+merge_one "female" "$RF" "$FEMALE_SPEC" "${OUT}/mvgwas_merged_female.tsv"

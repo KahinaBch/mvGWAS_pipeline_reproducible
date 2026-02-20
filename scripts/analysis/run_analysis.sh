@@ -114,8 +114,11 @@ fi
 
 # Merge
 run_cmd bash scripts/analysis/merge_results_sex.sh \
+  $( [[ -n "$MALE_CHRS" ]] && echo --male-chrs "$MALE_CHRS" ) \
+  $( [[ -n "$FEMALE_CHRS" ]] && echo --female-chrs "$FEMALE_CHRS" ) \
   --results-male "${BASE_DIR}/results_male" \
   --results-female "${BASE_DIR}/results_female" \
   --outdir "${BASE_DIR}/results_merged" \
   --chrs "$CHRS"
+
 

@@ -1,0 +1,54 @@
+Reproducing the mvGWAS pipeline
+
+This repository runs a 3-stage workflow:
+  1) preprocessing (format checks, harmonize subject IDs, sex split)
+  2) analysis (SLURM array + Nextflow mvgwas-nf per chromosome and sex)
+  3) merge + visualization
+
+0) Clone and set up
+- Install: python3 + pandas, bcftools, nextflow + java, R, SLURM commands (sbatch), and optionally plink2
+- Obtain mvgwas-nf (MANTA) pipeline and set PIPELINE_DIR to the folder that contains mvgwas.nf
+
+1) Prepare a configuration file
+  cp config/paths.example.env config/paths.env
+  Edit config/paths.env:
+    BASE_DIR=... (working directory for outputs)
+    GENO_INPUT=... (.vcf.gz/.vcf/.bcf or PLINK prefix)
+    PHENOTYPE_FILE=... (TSV with ID column)
+    COVARIATE_FILE=... (TSV with ID + sex column)
+    PIPELINE_DIR=... (folder containing mvgwas.nf)
+  Optional:
+    CHRS=1-22
+    SEX_COL=sex
+    MALE_CODE=1
+    FEMALE_CODE=2
+    WITH_SINGULARITY=1
+    NEXTFLOW_RESUME=1
+    WINDOW_L=500
+
+2) Run the full pipeline
+  bash run_all.sh --env config/paths.env --wait
+
+3) Validate without running (strong dry-run)
+  bash run_all.sh --env config/paths.env --dry-run
+
+4) Run subsets (examples)
+- Female chr13 only; male chr10 and chr16:
+  bash scripts/analysis/run_analysis.sh \
+    --base-dir "$BASE_DIR" \
+    --vcf "$BASE_DIR/derived/inputs/genotypes.filtered.vcf.gz" \
+    --pipeline "$PIPELINE_DIR" \
+    --female-chrs 13 \
+    --male-chrs 10,16
+
+5) Expected outputs
+- Preprocessing:
+  BASE_DIR/derived/inputs/genotypes.filtered.vcf.gz (+.tbi)
+  BASE_DIR/data_female/WMH_phenotypes.tsv and WMH_covariates.tsv
+  BASE_DIR/data_male/WMH_phenotypes.tsv and WMH_covariates.tsv
+- Analysis:
+  BASE_DIR/results_female/chr*/mvgwas_chr*.tsv
+  BASE_DIR/results_male/chr*/mvgwas_chr*.tsv
+- Merge:
+  BASE_DIR/results_merged/mvgwas_merged_female.tsv
+  BASE_DIR/results_merged/mvgwas_merged_male.tsv

@@ -40,7 +40,6 @@ while [[ $# -gt 0 ]]; do
     --geno) GENO="$2"; shift 2;;
     --vcf) VCF="$2"; shift 2;;  # legacy alias
     --covar) COVAR="$2"; shift 2;;
-    --covar) COVAR="$2"; shift 2;;
     --pheno) PHENO="$2"; shift 2;;
     --outdir) OUTDIR="$2"; shift 2;;
     --id-col) ID_COL="$2"; shift 2;;
@@ -87,6 +86,8 @@ need_cmd bcftools
 INPUT_VCF="$GENO_INPUT"
 GENO_DIR="$OUTDIR/derived/inputs"
 mkdir -p "$GENO_DIR"
+HARM_DIR="$OUTDIR/derived/inputs"
+mkdir -p "$HARM_DIR"
 STD_VCF="$GENO_DIR/genotypes.vcf.gz"
 
 echo "[preprocessing] Preparing genotype VCF (+index)..." | tee -a "$LOGDIR/run_preprocessing.log"
@@ -159,8 +160,6 @@ if [[ "${DRY_RUN:-0}" == "1" ]]; then
   fi
 fi
 
-HARM_DIR="$OUTDIR/derived/inputs"
-mkdir -p "$HARM_DIR"
 
 run_cmd python3 scripts/preprocessing/prepare_inputs.py \
   --covar "$COVAR" \
@@ -191,7 +190,7 @@ fi
 
 # Use filtered cov/pheno for sex split
 COVAR="$COV_F"
-PHENO="$PHE_F" | tee "$LOGDIR/run_preprocessing.log"
+PHENO="$PHE_F"
 run_cmd python3 scripts/preprocessing/split_by_sex.py \
   --covar "$COVAR" \
   --pheno "$PHENO" \
@@ -204,3 +203,4 @@ run_cmd python3 scripts/preprocessing/split_by_sex.py \
   | tee -a "$LOGDIR/run_preprocessing.log"
 
 echo "[preprocessing] $(date) done" | tee -a "$LOGDIR/run_preprocessing.log"
+
